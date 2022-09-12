@@ -10,7 +10,7 @@ namespace lua_bundler.Core
     public class FileGenerator
     {
         private string _workDir = ".";
-        private string _distCode = "";
+        private readonly StringBuilder _distCode = new StringBuilder();
         //TODO: "", ' 패턴 추가하기
         private readonly Regex _regex = new Regex("require\\(\"([0-9\\/a-zA-Z_-]+)\"\\)");
         private readonly Dictionary<string, bool> _requires = new Dictionary<string, bool>();
@@ -41,6 +41,12 @@ end";
         #endregion
         
         #region Utility
+
+        private static string GetDate()
+        {
+            return DateTime.Now.ToString(CultureInfo.InvariantCulture);
+        }
+
         /// <summary xml:lang="ko">
         /// 확장자를 제외한 파일 이름을 Get합니다
         /// </summary>
@@ -63,12 +69,31 @@ end";
             }
             return names;
         }
-        
+
+        private static bool IsNewLineAndEmpty(string line)
+        {
+            var a = Encoding.ASCII.GetBytes(line);
+            return a.Length == 1 && a[0] == 13;
+        }
+
         /// <summary xml:lang="ko">
         /// 루아파일 시작라인 마다 탭 처리를 한 뒤 리턴합니다.
         /// </summary>
-        private static string ReplaceWithPad(string file) 
-            => "\t" + file.Replace(Environment.NewLine, "\n\t");
+        private static string ReplaceWithPad(string file)
+        {
+            var result = new StringBuilder();
+            var lines = file.Split('\n');
+
+            foreach (var line in lines)
+            {
+                if (!IsNewLineAndEmpty(line))
+                    result.Append("\t");
+
+                result.Append(line);
+            }
+            
+            return result.ToString();
+        }
         
         /// <summary xml:lang="ko">
         /// 파일을 동기적으로 작성합니다
@@ -152,13 +177,14 @@ end";
                 return;
 
             var file = ReplaceWithPad(File.ReadAllText(filePath));
-            
-            _distCode += "\n----------------\n";
-            _distCode += $"__modules[\"{name}\"] = " + "{ inited = false, cached = false, loader = function(...)";
-            _distCode += $"\n---- START {name}.lua ----\n";
-            _distCode += file;
-            _distCode += $"\n---- END {name}.lua ----\n";
-            _distCode += "end}";
+
+            _distCode
+                .Append("\n----------------\n")
+                .Append($"__modules[\"{name}\"] = ").Append("{ inited = false, cached = false, loader = function(...)")
+                .Append($"\n---- START {name}.lua ----\n")
+                .Append(file)
+                .Append($"\n---- END {name}.lua ----\n")
+                .Append("end }");
             
             _requires[name] = true;
             
@@ -184,8 +210,6 @@ end";
 
             _workDir = fi.DirectoryName;
             
-            _distCode = CodeHeader;
-
             var mainFunctionName = GetFileName(mainPath);
 
             RecurseFiles(mainFunctionName);
@@ -196,11 +220,18 @@ end";
             {
                 Logger.Warn($"Unused File: {unusedFile}");
             }
+
+            // 헤더 생성
+            var header = new StringBuilder()
+                .Append(string.Format(RemarkHeader + "\n", _requires.Count, unusedFiles.Count, GetDate()))
+                .Append(CodeHeader);
+            
+            // 헤더 및 푸터 삽입
+            _distCode.Insert(0, header);
+            _distCode.Append(string.Format(CodeFooter, mainFunctionName));
             
             // 결과물 출력
-            return $"{string.Format(RemarkHeader, _requires.Count, unusedFiles.Count, DateTime.Now.ToString(CultureInfo.InvariantCulture))}\n" +
-                   $"{_distCode}" +
-                   $"{string.Format(CodeFooter, mainFunctionName)}";
+            return _distCode.ToString();
         }
         #endregion
         
