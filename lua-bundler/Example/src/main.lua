@@ -1,5 +1,5 @@
 require("lib/logger")
-local Test = require("Test")
+local Test = require("test")
 
 print("Logger Test")
 
