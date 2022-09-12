@@ -39,11 +39,18 @@
         <Reference Include="System.Xml" />
     </ItemGroup>
     <ItemGroup>
+        <Compile Include="Core\LuaBundler.cs" />
         <Compile Include="Program.cs" />
         <Compile Include="Properties\AssemblyInfo.cs" />
     </ItemGroup>
     <ItemGroup>
-      <Folder Include="Core" />
+      <Folder Include="Example\dist" />
+    </ItemGroup>
+    <ItemGroup>
+      <Content Include="Example\src\lib\logger.lua" />
+      <Content Include="Example\src\lib\unused.lua" />
+      <Content Include="Example\src\main.lua" />
+      <Content Include="Example\src\test.lua" />
     </ItemGroup>
     <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
     <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
