@@ -7,7 +7,8 @@ namespace lua_bundler
 {
     internal class Program : Process
     {
-        private FileGenerator _generator;
+        private readonly FileGenerator _bundler;
+        private bool _inited;
         private const string baseSourcePath = @"C:\Projects\lua-bundler\lua-bundler\Example\src\";
         private const string baseDistPath = @"C:\Projects\lua-bundler\lua-bundler\Example\dist\";
         
@@ -16,24 +17,23 @@ namespace lua_bundler
             var a = new Program();
         }
 
-        public Program()
+        private Program()
         {
-            _generator = new FileGenerator();
+            _bundler = new FileGenerator();
             Executor();
         }
 
-        private bool inited;
         
         private void Executor()
         {
             while (true)
             {
-                if (!inited)
+                if (!_inited)
                 {
                     Console.WriteLine("---------------------------------------");
                     Console.WriteLine("번들링 파일과 출력 파일 경로를 적어주세요");
                     Console.WriteLine("ex) \"input.lua\" \"output.lua\"");
-                    inited = true;
+                    _inited = true;
                 }
 
                 var cmd = Console.ReadLine();
@@ -45,7 +45,7 @@ namespace lua_bundler
                 var args = cmd.Split(' ');
                 if (args.Length == 2)
                 {
-                    _generator.ToFile($@"{baseSourcePath}{args[0]}",$@"{baseDistPath}{args[1]}");
+                    _bundler.ToFile($@"{baseSourcePath}{args[0]}",$@"{baseDistPath}{args[1]}");
                 }
             }
         }

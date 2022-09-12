@@ -9,13 +9,19 @@ namespace lua_bundler.Core
 {
     public class FileGenerator
     {
+        private string _workDir = ".";
+        private string _distCode = "";
+        //TODO: "", ' 패턴 추가하기
+        private readonly Regex _regex = new Regex("require\\(\"([0-9\\/a-zA-Z_-]+)\"\\)");
+        private readonly Dictionary<string, bool> _requires = new Dictionary<string, bool>();
+        
         #region Lua Code Snippets
-        private const string remarkHeader = 
+        private const string RemarkHeader = 
 @"-- Bundled Files: {0}
 -- Unused Files: {1}
 -- Bundled At: {2}";
 
-        private const string codeHeader = 
+        private const string CodeHeader = 
 @"local __modules = {}
 local require = function(path)
     local module = __modules[path]
@@ -30,19 +36,39 @@ local require = function(path)
         return nil
     end
 end";
-        private const string codeFooter = "\n__modules[\"{0}\"].loader()";
+        private const string CodeFooter = "\n-- Execute Main Function" +
+                                          "\n__modules[\"{0}\"].loader()";
         #endregion
-        
-        private string workDir = ".";
-        private string outStr = "";
-        private Regex regex = new Regex("require\\(\"([0-9\\/a-zA-Z_-]+)\"\\)");
-        private Dictionary<string, bool> requireList = new Dictionary<string, bool>();
         
         #region Utility
         /// <summary xml:lang="ko">
         /// 확장자를 제외한 파일 이름을 Get합니다
         /// </summary>
         private static string GetFileName(string mainPath) => Path.GetFileNameWithoutExtension(mainPath);
+
+        /// <summary xml:lang="ko">
+        /// 디렉토리 내의 모든 루아 파일의 이름을 얻습니다.
+        /// </summary>
+        private static IEnumerable<string> GetAllLuaFileNames(string dir)
+        {
+            var names = new List<string>();
+            var files = Directory.GetFiles($@"{dir}", "*.lua", SearchOption.AllDirectories);
+            foreach (var file in files)
+            {
+                var name = file
+                    .Replace($@"{dir}\", "")
+                    .Replace(".lua", "")
+                    .Replace(@"\", "/");
+                names.Add(name);
+            }
+            return names;
+        }
+        
+        /// <summary xml:lang="ko">
+        /// 루아파일 시작라인 마다 탭 처리를 한 뒤 리턴합니다.
+        /// </summary>
+        private static string ReplaceWithPad(string file) 
+            => "\t" + file.Replace(Environment.NewLine, "\n\t");
         
         /// <summary xml:lang="ko">
         /// 파일을 동기적으로 작성합니다
@@ -55,24 +81,52 @@ end";
                 fs.Write(info,0,info.Length);
             }
         }
+
+        /// <summary xml:lang="ko">
+        /// 파일 여부 리턴
+        /// </summary>
+        private static bool CheckFileExist(string path)
+        {
+            var fi = new FileInfo(path).Exists;
+            if (!fi)
+                Logger.Error($"File not found - {path}");
+            return fi;
+        }
         #endregion
         
         #region Main Logic
         /// <summary xml:lang="ko">
-        /// Require 예약어 걸린 파일 이름 얻기
+        /// 폴더 내에 안쓰는 루아 모듈 얻기
+        /// </summary>
+        private List<string> GetUnusedFiles(string dir)
+        {
+            var list = new List<string>();
+            var names = GetAllLuaFileNames(dir);
+            foreach(var name in names)
+            {
+                if (!_requires.ContainsKey(name))
+                {
+                    list.Add(name);
+                }
+            }
+            return list;
+        }
+        
+        /// <summary xml:lang="ko">
+        /// require 예약어 걸린 파일 이름 리스트 얻기
         /// </summary>
         private List<string> GetNewFileNames(string file)
         {
-            var matches = regex.Matches(file);
+            var matches = _regex.Matches(file);
             
             // 중복 파일일 경우 Emit 하지 않기
             var newNames = new List<string>();
             foreach (Match match in matches)
             {
                 var newName = match.Groups[1].ToString();
-                if (requireList.ContainsKey(newName))
+                if (_requires.ContainsKey(newName))
                 {
-                    requireList[newName] = false;
+                    _requires[newName] = false;
                 }
                 else
                 {
@@ -89,100 +143,54 @@ end";
         /// <param name="name"></param>
         private void RecurseFiles(string name)
         {
-            // 이미 생성했던 파일이면 return
-            if (requireList.ContainsKey(name) && requireList[name])
+            if (_requires.ContainsKey(name) && _requires[name])
                 return;
             
-            var filePath = Path.Combine(workDir, name + ".lua");
-            
-            var fileInfo = new FileInfo(filePath);
+            var filePath = Path.Combine(_workDir, name + ".lua");
 
-            if (!fileInfo.Exists)
-            {
-                Logger.Error($"File not found - {filePath}");
+            if (!CheckFileExist(filePath))
                 return;
-            }
 
-            var file = File.ReadAllText(filePath);
-            var matches = regex.Matches(file);
-
-            outStr += "\n----------------\n";
-            outStr += $"__modules[\"{name}\"] = " + "{ inited = false, cached = false, loader = function(...)";
-            outStr += $"\n---- START {name}.lua ----\n";
-            outStr += file;
-            outStr += $"\n---- END {name}.lua ----\n";
-            outStr += " end}";
+            var file = ReplaceWithPad(File.ReadAllText(filePath));
             
-            requireList[name] = true;
+            _distCode += "\n----------------\n";
+            _distCode += $"__modules[\"{name}\"] = " + "{ inited = false, cached = false, loader = function(...)";
+            _distCode += $"\n---- START {name}.lua ----\n";
+            _distCode += file;
+            _distCode += $"\n---- END {name}.lua ----\n";
+            _distCode += "end}";
+            
+            _requires[name] = true;
             
             // logger
             Logger.Success(filePath);
             
-            // require 예약어 처리
-            // 중복 파일일 경우 Emit 하지 않기
-            var newNames = new List<string>();
-            foreach (Match match in matches)
-            {
-                var newName = match.Groups[1].ToString();
-                if (requireList.ContainsKey(newName))
-                {
-                    requireList[newName] = false;
-                }
-                else
-                {
-                    newNames.Add(newName);
-                }
-            }
-
-            // 뎁스 추적하며 파일 생성하기
-            foreach (var newName in newNames)
+            // 뎁스 추적하며 require 예약어가 걸린 파일들 생성하기
+            foreach (var newName in GetNewFileNames(file))
             {
                 RecurseFiles(newName);
             }
         }
         
-        private List<string> GetUnusedFiles(string dir)
-        {
-            var list = new List<string>();
-            var files = Directory.GetFiles($@"{dir}", "*.lua", SearchOption.AllDirectories);
-            foreach(var file in files)
-            {
-                var name = file
-                    .Replace($@"{dir}\", "")
-                    .Replace(".lua", "")
-                    .Replace(@"\", "/");
-                    
-                if (!requireList.ContainsKey(name))
-                {
-                    list.Add(name);
-                }
-            }
-
-            return list;
-        }
-        
-        /// <summary>
-        /// 코드 생성
+        /// <summary xml:lang="ko">
+        /// 전체 코드 생성기
         /// </summary>
-        private string EmitCode(string mainPath)
+        private string GenerateCode(string mainPath)
         {
-            var file = new FileInfo(mainPath);
-
-            if (!file.Exists)
-            {
-                Logger.Error($"File not found - {mainPath}");
-                return "";
-            }
-
-            workDir = file.DirectoryName;
+            var fi = new FileInfo(mainPath);
             
-            outStr = codeHeader;
+            if (!CheckFileExist(mainPath))
+                return "";
+
+            _workDir = fi.DirectoryName;
+            
+            _distCode = CodeHeader;
 
             var mainFunctionName = GetFileName(mainPath);
 
             RecurseFiles(mainFunctionName);
             
-            var unusedFiles = GetUnusedFiles(workDir);
+            var unusedFiles = GetUnusedFiles(_workDir);
             
             foreach (var unusedFile in unusedFiles)
             {
@@ -190,9 +198,9 @@ end";
             }
             
             // 결과물 출력
-            return $"{string.Format(remarkHeader, requireList.Count, unusedFiles.Count, DateTime.Now.ToString(CultureInfo.InvariantCulture))}\n" +
-                   $"{outStr}" +
-                   $"{string.Format(codeFooter, mainFunctionName)}";
+            return $"{string.Format(RemarkHeader, _requires.Count, unusedFiles.Count, DateTime.Now.ToString(CultureInfo.InvariantCulture))}\n" +
+                   $"{_distCode}" +
+                   $"{string.Format(CodeFooter, mainFunctionName)}";
         }
         #endregion
         
@@ -202,20 +210,15 @@ end";
         /// </summary>
         public void ToFile(string mainPath, string outPath)
         {
-            var fPath = new FileInfo(mainPath);
-            
-            if (!fPath.Exists)
-            {
-                Logger.Error($"File not found - {mainPath}");
+            if (!CheckFileExist(mainPath))
                 return;
-            }
 
-            var luaFile = EmitCode(mainPath);
+            var luaFile = GenerateCode(mainPath);
             
             CreateFileSync(outPath, luaFile);
             
-            Logger.Success($"Bundled Files: {requireList.Count}, Unused Files: {GetUnusedFiles(workDir).Count}");
-            requireList.Clear();
+            Logger.Success($"Bundled Files: {_requires.Count}, Unused Files: {GetUnusedFiles(_workDir).Count}");
+            _requires.Clear();
         }
         #endregion
     }
