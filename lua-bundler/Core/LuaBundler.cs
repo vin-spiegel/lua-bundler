@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -10,12 +9,13 @@ namespace lua_bundler.Core
 {
     public class FileGenerator
     {
-        private string workDir = ".";
-        private string outStr = "";
-        /// <summary>
-        /// 번들 파일의 헤더 부분
-        /// </summary>
-        private string codeHeader = 
+        #region Lua Code Snippets
+        private const string remarkHeader = 
+@"-- Bundled Files: {0}
+-- Unused Files: {1}
+-- Bundled At: {2}";
+
+        private const string codeHeader = 
 @"local __modules = {}
 local require = function(path)
     local module = __modules[path]
@@ -30,9 +30,12 @@ local require = function(path)
         return nil
     end
 end";
-
-        private Regex regex = new Regex("require\\(\"([0-9\\/a-zA-Z_-]+)\"\\)");
+        private const string codeFooter = "\n__modules[\"{0}\"].loader()";
+        #endregion
         
+        private string workDir = ".";
+        private string outStr = "";
+        private Regex regex = new Regex("require\\(\"([0-9\\/a-zA-Z_-]+)\"\\)");
         private Dictionary<string, bool> requireList = new Dictionary<string, bool>();
         
         /// <summary xml:lang="ko">
@@ -111,7 +114,12 @@ end";
 
             return list;
         }
-        
+
+        /// <summary xml:lang="ko">
+        /// 확장자를 제외한 파일 이름을 Get합니다
+        /// </summary>
+        private string GetFileName(string mainPath) => Path.GetFileNameWithoutExtension(mainPath);
+
         /// <summary>
         /// 코드 내보내기
         /// </summary>
@@ -129,20 +137,21 @@ end";
             
             outStr = codeHeader;
 
-            var mainName = Path.GetFileNameWithoutExtension(mainPath);
+            var mainFunctionName = GetFileName(mainPath);
 
-            RecurseFiles(mainName);
+            RecurseFiles(mainFunctionName);
             
             var unusedFiles = GetUnusedFiles(workDir);
+            
             foreach (var unusedFile in unusedFiles)
             {
                 Logger.Warn($"Unused File: {unusedFile}");
             }
             
-            var nowDate = $"-- Bundled At : {DateTime.Now.ToString(CultureInfo.InvariantCulture)}\n";
-            var bundledFile = $"-- Bundled Files: {requireList.Count}\n";
-            var loader = $"\n__modules[\"{mainName}\"].loader()";
-            return $"{bundledFile}{nowDate}{outStr}{loader}";
+            // 결과물 출력
+            return $"{string.Format(remarkHeader, requireList.Count, unusedFiles.Count, DateTime.Now.ToString(CultureInfo.InvariantCulture))}\n" +
+                   $"{outStr}" +
+                   $"{string.Format(codeFooter, mainFunctionName)}";
         }
 
         /// <summary xml:lang="ko">
@@ -158,7 +167,7 @@ end";
         }
 
         /// <summary xml:lang="ko">
-        /// 파일을 하나로 묶어서 번들링 해줍니다.
+        /// 루아 파일들을 하나로 묶어서 번들링 해줍니다.
         /// </summary>
         public void ToFile(string mainPath, string outPath)
         {
@@ -170,9 +179,9 @@ end";
                 return;
             }
 
-            var file = EmitCode(mainPath);
+            var luaFile = EmitCode(mainPath);
             
-            CreateFileSync(outPath, file);
+            CreateFileSync(outPath, luaFile);
             
             Logger.Success($"Bundled Files: {requireList.Count}, Unused Files: {GetUnusedFiles(workDir).Count}");
             requireList.Clear();
