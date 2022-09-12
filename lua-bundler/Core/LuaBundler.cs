@@ -68,17 +68,17 @@ end";
             if (requireList.ContainsKey(name) && requireList[name])
                 return;
             
-            var fpath = Path.Combine(workDir, name + ".lua");
+            var filePath = Path.Combine(workDir, name + ".lua");
             
-            var fileInfo = new FileInfo(fpath);
+            var fileInfo = new FileInfo(filePath);
 
             if (!fileInfo.Exists)
             {
-                Logger.Error($"File not found - {fpath}");
+                Logger.Error($"File not found - {filePath}");
                 return;
             }
 
-            var file = File.ReadAllText(fpath);
+            var file = File.ReadAllText(filePath);
             var matches = regex.Matches(file);
 
             outStr += "\n----------------\n";
@@ -91,7 +91,7 @@ end";
             requireList[name] = true;
             
             // logger
-            Logger.Success(fpath);
+            Logger.Success(filePath);
             
             // require 예약어 처리
             // 중복 파일일 경우 Emit 하지 않기
