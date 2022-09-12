@@ -58,7 +58,32 @@ end";
         #endregion
         
         #region Main Logic
-         /// <summary xml:lang="ko">
+        /// <summary xml:lang="ko">
+        /// Require 예약어 걸린 파일 이름 얻기
+        /// </summary>
+        private List<string> GetNewFileNames(string file)
+        {
+            var matches = regex.Matches(file);
+            
+            // 중복 파일일 경우 Emit 하지 않기
+            var newNames = new List<string>();
+            foreach (Match match in matches)
+            {
+                var newName = match.Groups[1].ToString();
+                if (requireList.ContainsKey(newName))
+                {
+                    requireList[newName] = false;
+                }
+                else
+                {
+                    newNames.Add(newName);
+                }
+            }
+
+            return newNames;
+        }
+
+        /// <summary xml:lang="ko">
         /// 루아 코드를 재귀적으로 생성합니다
         /// </summary>
         /// <param name="name"></param>
