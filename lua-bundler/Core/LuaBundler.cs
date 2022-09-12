@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -9,22 +10,12 @@ namespace lua_bundler.Core
 {
     public class FileGenerator
     {
-        /// <summary>
-        /// 번들 파일이름
-        /// </summary>
-        public string DistName => "___bundle___.lua";
-        
-        public string workDir = ".";
-        public string outStr = "";
+        private string workDir = ".";
+        private string outStr = "";
         /// <summary>
         /// 번들 파일의 헤더 부분
         /// </summary>
-        public string codeHeader 
-        {
-            get
-            {
-                var nowDate = $"-- Bundled At : {DateTime.Now.ToString(CultureInfo.InvariantCulture)}\n";
-                return nowDate + 
+        private string codeHeader = 
 @"local __modules = {}
 local require = function(path)
     local module = __modules[path]
@@ -39,104 +30,125 @@ local require = function(path)
         return nil
     end
 end";
-            }
-        }
-        private Regex regex = new Regex("^(?!--)(.*require)[ \t]*\\?(.*)");
-        public string DistFile
-        {
-            get
-            {
-                var res = codeHeader + "";
-                return res;
-            }
-        }
+
+        private Regex regex = new Regex("require\\(\"([0-9\\/a-zA-Z_-]+)\"\\)");
         
         private Dictionary<string, bool> requireList = new Dictionary<string, bool>();
-        // private string outStr = "";
         
-        public void recurseFiles(string name)
+        /// <summary xml:lang="ko">
+        /// 루아 코드를 재귀적으로 생성합니다
+        /// </summary>
+        /// <param name="name"></param>
+        private void RecurseFiles(string name)
         {
-            if (requireList.ContainsKey(name))
+            // 이미 생성했던 파일이면 return
+            if (requireList.ContainsKey(name) && requireList[name])
                 return;
             
             var fpath = Path.Combine(workDir, name + ".lua");
             
-            var file = new FileInfo(fpath);
+            var fileInfo = new FileInfo(fpath);
 
-            if (!file.Exists)
+            if (!fileInfo.Exists)
             {
-                Console.WriteLine($@"File not found {fpath}");
+                Logger.Error($"File not found - {fpath}");
                 return;
             }
 
+            var file = File.ReadAllText(fpath);
+            var matches = regex.Matches(file);
+            
+            outStr += "\n----------------\n";
+            outStr += $"__modules[\"{name}\"] = " + "{ inited = false, cached = false, loader = function(...)";
+            outStr += $"\n---- START {name}.lua ----\n";
+            outStr += file;
+            outStr += $"\n---- END {name}.lua ----\n";
+            outStr += " end}";
+            requireList[name] = true;
+            
+            // logger
+            Logger.Success(fpath);
+            
+            // require 예약어 처리
+            // 중복 파일일 경우 Emit 하지 않기
             var newNames = new List<string>();
-            // const newNames = []
+            foreach (Match match in matches)
+            {
+                var newName = match.Groups[1].ToString();
+                if (requireList.ContainsKey(newName))
+                {
+                    requireList[newName] = false;
+                }
+                else
+                {
+                    newNames.Add(newName);
+                }
+            }
 
-            // const file = fs.readFileSync(fpath).toString().replace(regex, (m, p1, p2, p3) =>
-            // {
-            //     return `${
-            //         p1
-            //     }
-            //     ("${p2.replace(/\./g, " / ")}")${
-            //         p3
-            //     }`
-            // });
-            // outStr += "\n----------------\n";
-            // outStr += $"__modules['{name}'] = " + "{ inited = false, cached = false, loader = function(...)";
-            // outStr += $"\n---- START {name}.lua ----\n";
-            // outStr += file;
-            // outStr += $"\n---- END {name}.lua ----\n";
-            // outStr += " end}";
-            // requireList[name] = true;
-            // requires
-            // let match
-            // do {
-            //     match = regex.exec(file)
-            //     if (match != null) {
-            //         if (requireList[match[2]] === undefined) {
-            //             requireList[match[2]] = false
-            //             newNames.push(match[2])
-            //         }
-            //     }
-            // } 
-            // while (match != null)
-            // {
-            //     for (let i = 0; i < newNames.length; i++) 
-            //     {
-            //         recurseFiles(newNames[i])
-            //     }
-            // }
+            // 뎁스 추적하며 파일 생성하기
+            foreach (var newName in newNames)
+            {
+                RecurseFiles(newName);
+            }
         }
-        public string emitCode(string mainPath)
+        
+        private List<string> GetUnusedFiles(string dir)
+        {
+            var list = new List<string>();
+            var files = Directory.GetFiles($@"{dir}", "*.lua", SearchOption.AllDirectories);
+            foreach(var file in files)
+            {
+                var name = file
+                    .Replace($@"{dir}\", "")
+                    .Replace(".lua", "")
+                    .Replace(@"\", "/");
+                    
+                if (!requireList.ContainsKey(name))
+                {
+                    list.Add(name);
+                }
+            }
+
+            return list;
+        }
+        
+        /// <summary>
+        /// 코드 내보내기
+        /// </summary>
+        private string EmitCode(string mainPath)
         {
             var file = new FileInfo(mainPath);
 
             if (!file.Exists)
             {
-                Console.WriteLine($@"File not found {mainPath}");
+                Logger.Error($"File not found - {mainPath}");
                 return "";
             }
 
             workDir = file.DirectoryName;
-
+            
             outStr = codeHeader;
 
             var mainName = Path.GetFileNameWithoutExtension(mainPath);
 
-            recurseFiles(mainName);
-            // var unused = new List<string>();
-            // findUnusedFiles(workDir, unused)
-            // for (const file of unused)
-            // {
-            //     logger.warn("Unused file " + file + ".lua")
-            // }
-            return outStr + $"\n__modules[\"{mainName}\"].loader()";
+            RecurseFiles(mainName);
+            
+            var unusedFiles = GetUnusedFiles(workDir);
+            foreach (var unusedFile in unusedFiles)
+            {
+                Logger.Warn($"Unused File: {unusedFile}");
+            }
+            
+            var nowDate = $"-- Bundled At : {DateTime.Now.ToString(CultureInfo.InvariantCulture)}\n";
+            var bundledFile = $"-- Bundled Files: {requireList.Count}\n";
+            var loader = $"\n__modules[\"{mainName}\"].loader()";
+            return $"{bundledFile}{nowDate}{outStr}{loader}";
         }
 
         /// <summary xml:lang="ko">
         /// 파일을 동기적으로 작성합니다
         /// </summary>
-        public void CreateFileSync(string outPath, string file)
+        private void CreateFileSync(string outPath, string file)
         {
             using (var fs = File.Create(outPath))
             {
@@ -145,19 +157,24 @@ end";
             }
         }
 
+        /// <summary xml:lang="ko">
+        /// 파일을 하나로 묶어서 번들링 해줍니다.
+        /// </summary>
         public void ToFile(string mainPath, string outPath)
         {
             var fPath = new FileInfo(mainPath);
-
+            
             if (!fPath.Exists)
             {
-                Console.WriteLine($@"File not found {mainPath}");
+                Logger.Error($"File not found - {mainPath}");
                 return;
             }
 
-            var file = emitCode(mainPath);
+            var file = EmitCode(mainPath);
+            
             CreateFileSync(outPath, file);
             
+            Logger.Success($"Bundled Files: {requireList.Count}, Unused Files: {GetUnusedFiles(workDir).Count}");
             requireList.Clear();
         }
     }
