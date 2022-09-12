@@ -38,7 +38,27 @@ end";
         private Regex regex = new Regex("require\\(\"([0-9\\/a-zA-Z_-]+)\"\\)");
         private Dictionary<string, bool> requireList = new Dictionary<string, bool>();
         
+        #region Utility
         /// <summary xml:lang="ko">
+        /// 확장자를 제외한 파일 이름을 Get합니다
+        /// </summary>
+        private static string GetFileName(string mainPath) => Path.GetFileNameWithoutExtension(mainPath);
+        
+        /// <summary xml:lang="ko">
+        /// 파일을 동기적으로 작성합니다
+        /// </summary>
+        private static void CreateFileSync(string outPath, string file)
+        {
+            using (var fs = File.Create(outPath))
+            {
+                var info = new UTF8Encoding(true).GetBytes(file);
+                fs.Write(info,0,info.Length);
+            }
+        }
+        #endregion
+        
+        #region Main Logic
+         /// <summary xml:lang="ko">
         /// 루아 코드를 재귀적으로 생성합니다
         /// </summary>
         /// <param name="name"></param>
@@ -60,13 +80,14 @@ end";
 
             var file = File.ReadAllText(fpath);
             var matches = regex.Matches(file);
-            
+
             outStr += "\n----------------\n";
             outStr += $"__modules[\"{name}\"] = " + "{ inited = false, cached = false, loader = function(...)";
             outStr += $"\n---- START {name}.lua ----\n";
             outStr += file;
             outStr += $"\n---- END {name}.lua ----\n";
             outStr += " end}";
+            
             requireList[name] = true;
             
             // logger
@@ -114,14 +135,9 @@ end";
 
             return list;
         }
-
-        /// <summary xml:lang="ko">
-        /// 확장자를 제외한 파일 이름을 Get합니다
-        /// </summary>
-        private string GetFileName(string mainPath) => Path.GetFileNameWithoutExtension(mainPath);
-
+        
         /// <summary>
-        /// 코드 내보내기
+        /// 코드 생성
         /// </summary>
         private string EmitCode(string mainPath)
         {
@@ -153,19 +169,9 @@ end";
                    $"{outStr}" +
                    $"{string.Format(codeFooter, mainFunctionName)}";
         }
-
-        /// <summary xml:lang="ko">
-        /// 파일을 동기적으로 작성합니다
-        /// </summary>
-        private void CreateFileSync(string outPath, string file)
-        {
-            using (var fs = File.Create(outPath))
-            {
-                var info = new UTF8Encoding(true).GetBytes(file);
-                fs.Write(info,0,info.Length);
-            }
-        }
-
+        #endregion
+        
+        #region Public Methods
         /// <summary xml:lang="ko">
         /// 루아 파일들을 하나로 묶어서 번들링 해줍니다.
         /// </summary>
@@ -186,5 +192,6 @@ end";
             Logger.Success($"Bundled Files: {requireList.Count}, Unused Files: {GetUnusedFiles(workDir).Count}");
             requireList.Clear();
         }
+        #endregion
     }
 }
